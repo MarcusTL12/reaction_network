@@ -163,6 +163,9 @@ function Base.show(io::IO, r::Reaction)
     @printf io "  kf = %.2e, kr = %.2e" r.kf r.kr
 end
 
+# ideal gas constant (R) with units L atm / (mol K)
+gas_constant::Float64 = 0.082057366080960
+
 abstract type GasContainer end
 
 struct ConstantVolume <: GasContainer
@@ -175,6 +178,10 @@ struct ConstantPressure <: GasContainer
     temperature::Float64
 end
 
+struct InfiniteGas <: GasContainer
+    partial_pressures::Dict{Gas,Float64}
+end
+
 function Base.show(io::IO, c::ConstantVolume)
     @printf io "Gas at constant volume: V = %.2f L, T = %.2f K" c.volume c.temperature
 end
@@ -183,28 +190,99 @@ function Base.show(io::IO, c::ConstantPressure)
     @printf io "Gas at constant pressure: P = %.2f atm, T = %.2f" c.volume c.temperature
 end
 
+function Base.show(io::IO, c::InfiniteGas)
+    if !isempty(c.partial_pressures)
+        println(io, "Infinite gas volume with fixed partial pressures:")
+        for (c, p) in c.partial_pressures
+            print(io, "p_", name(c), " = ")
+            @printf io "%.2f atm\n" p
+        end
+    end
+end
+
 # Assuming unchanging molar fraction of liquids and solids for now
 struct ReactionNetwork
     reactions::Vector{Reaction}
     compounds::Vector{Compound}
 
-    solution_volume::Float64
+    # Solution volume of nothing means only concentrations are propagated
+    solution_volume::Union{Nothing,Float64}
     gascontainer::GasContainer
 end
 
 function Base.show(io::IO, network::ReactionNetwork)
     println(io, "Reactions:")
+    maxdigits = ndigits(length(network.reactions))
     for (i, rx) in enumerate(network.reactions)
-        @printf io "(%2d) " i
+        for _ in ndigits(i):(maxdigits - 1)
+            print(io, ' ')
+        end
+        print(io, '(', i, ") ")
         println(io, rx)
     end
 
     println(io, "\nCompounds:")
+    maxdigits = ndigits(length(network.compounds))
     for (i, c) in enumerate(network.compounds)
-        @printf io "(%2d) " i
+        for _ in ndigits(i):(maxdigits - 1)
+            print(io, ' ')
+        end
+        print(io, '(', i, ") ")
         println(io, c)
     end
 
-    @printf io "Solution volume: %.2f L\n" network.solution_volume
+    if !isnothing(network.solution_volume)
+        @printf io "Solution volume: %.2f L\n" network.solution_volume
+    end
     println(io, network.gascontainer)
+end
+
+function ReactionNetwork(reactions...;
+    V_s=nothing, V_g=nothing, P=nothing, T=nothing, partial_pressures=nothing)
+
+    gas = if !isnothing(partial_pressures)
+        if !isnothing(V_g)
+            @warn "Gas volume ignored as partial pressures are specified!"
+        end
+
+        if !isnothing(P)
+            @warn "Gas pressure ignored as partial pressures are specified!"
+        end
+
+        InfiniteGas(partial_pressures)
+    elseif !isnothing(V_g)
+        if !isnothing(P)
+            @warn "Gas pressure ignored as volume is specified"
+        end
+
+        if isnothing(T)
+            @info "Temperature defaults to 298.15 K"
+            T = 298.15
+        end
+
+        ConstantVolume(V_g, T)
+    elseif !isnothing(P)
+        if isnothing(T)
+            @info "Temperature defaults to 298.15 K"
+            T = 298.15
+        end
+
+        ConstantPressure(P, T)
+    else
+        InfiniteGas(Dict())
+    end
+
+    reactions = collect(reactions)
+    compounds = Compound[]
+
+    for rx in reactions
+        @show typeof(rx)
+        for (c, _) in Iterators.flatten((rx.reactants, rx.products))
+            if c ∉ compounds
+                push!(compounds, c)
+            end
+        end
+    end
+
+    ReactionNetwork(reactions, compounds, V_s, gas)
 end
