@@ -187,7 +187,7 @@ function Base.show(io::IO, c::ConstantVolume)
 end
 
 function Base.show(io::IO, c::ConstantPressure)
-    @printf io "Gas at constant pressure: P = %.2f atm, T = %.2f" c.volume c.temperature
+    @printf io "Gas at constant pressure: P = %.2f atm, T = %.2f" c.pressure c.temperature
 end
 
 function Base.show(io::IO, c::InfiniteGas)
@@ -231,10 +231,12 @@ function Base.show(io::IO, network::ReactionNetwork)
         println(io, c)
     end
 
+    println(io, "")
+
     if !isnothing(network.solution_volume)
         @printf io "Solution volume: %.2f L\n" network.solution_volume
     end
-    println(io, network.gascontainer)
+    print(io, network.gascontainer)
 end
 
 function ReactionNetwork(reactions...;
@@ -249,7 +251,7 @@ function ReactionNetwork(reactions...;
             @warn "Gas pressure ignored as partial pressures are specified!"
         end
 
-        InfiniteGas(partial_pressures)
+        InfiniteGas(Dict(partial_pressures))
     elseif !isnothing(V_g)
         if !isnothing(P)
             @warn "Gas pressure ignored as volume is specified"
